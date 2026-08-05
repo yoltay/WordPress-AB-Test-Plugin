@@ -45,10 +45,19 @@ class ABTI_Admin {
             self::MENU_SLUG . '-new',
             array( $this, 'route_page' )
         );
+
+        add_submenu_page(
+            self::MENU_SLUG,
+            __( 'Nasıl Çalışır', 'ab-test-int' ),
+            __( 'Nasıl Çalışır', 'ab-test-int' ),
+            'manage_options',
+            'abti-help',
+            array( $this, 'route_page' )
+        );
     }
 
     public function enqueue_assets( $hook ) {
-        if ( strpos( (string) $hook, self::MENU_SLUG ) === false ) {
+        if ( strpos( (string) $hook, self::MENU_SLUG ) === false && strpos( (string) $hook, 'abti-help' ) === false ) {
             return;
         }
         wp_enqueue_style(
@@ -96,6 +105,10 @@ class ABTI_Admin {
         $action = isset( $_GET['action'] ) ? sanitize_text_field( wp_unslash( $_GET['action'] ) ) : '';
         $page   = isset( $_GET['page'] ) ? sanitize_text_field( wp_unslash( $_GET['page'] ) ) : '';
 
+        if ( $page === 'abti-help' ) {
+            $this->render_help_page();
+            return;
+        }
         if ( $page === self::MENU_SLUG . '-new' || $action === 'new' ) {
             $this->render_form_page( null );
             return;
@@ -232,6 +245,10 @@ class ABTI_Admin {
     private function render_list_page() {
         $tests = ABTI_Database::get_tests();
         include ABTI_DIR . 'admin/views/list.php';
+    }
+
+    private function render_help_page() {
+        include ABTI_DIR . 'admin/views/help.php';
     }
 
     /* -----------------------------------------------------------------

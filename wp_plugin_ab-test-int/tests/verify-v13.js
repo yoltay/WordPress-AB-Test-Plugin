@@ -19,8 +19,8 @@ const frontend = read('includes/class-abti-frontend.php');
 const tracker = read('public/js/abti-frontend.js');
 const admin = read('includes/class-abti-admin.php');
 
-contains(plugin, /Version:\s*1\.3\.0/, 'Plugin header must be 1.3.0');
-contains(plugin, /define\(\s*'ABTI_VERSION',\s*'1\.3\.0'\s*\)/, 'ABTI_VERSION must be 1.3.0');
+contains(plugin, /Version:\s*1\.3\.1/, 'Plugin header must be 1.3.1');
+contains(plugin, /define\(\s*'ABTI_VERSION',\s*'1\.3\.1'\s*\)/, 'ABTI_VERSION must be 1.3.1');
 contains(plugin, /ABTI_Database::maybe_upgrade\(\)/, 'Upload replacement must run the DB upgrade');
 
 contains(database, /abti_assignments/, 'Assignments table must be additive');
@@ -36,12 +36,20 @@ contains(frontend, /abti_v3_test_/, 'Picker assignments must use v3 storage keys
 contains(frontend, /abti_v3_visitor/, 'Picker visitor ID must use a v3 storage key');
 contains(frontend, /xhr\.open\('POST',c\.assign,false\)/, 'First assignment must block parsing until the server responds');
 contains(frontend, /data-no-optimize="1"/, 'Inline picker must remain excluded from optimization');
-contains(frontend, /rocket_rucss_inline_content_exclusions/, 'WP Rocket Used CSS exclusion must remain active');
+contains(frontend, /abti-v131-hide-all/, 'Inline hide style must use the v1.3.1 DOM marker');
+contains(frontend, /HIDE_STYLE_ATTR\s*=\s*'data-abti-rucss'/, 'Inline hide style must expose a RUCSS skip attribute');
+contains(frontend, /HIDE_STYLE_ATTR_VALUE\s*=\s*'skip'/, 'Inline hide style must expose the RUCSS skip value');
+contains(frontend, /rocket_rucss_inline_content_exclusions/, 'WP Rocket Used CSS content exclusion must remain active');
+contains(frontend, /rocket_rucss_inline_atts_exclusions/, 'WP Rocket Used CSS attribute exclusion must be active');
+contains(frontend, /rocket_rucss_skip_styles_with_attr/, 'WP Rocket Used CSS skip-by-attribute exclusion must be active');
+contains(frontend, /rocket_usedcss_content/, 'WP Rocket generated Used CSS must be filtered');
+contains(frontend, /stripStaleOptimizerCss/, 'Picker must remove stale optimizer ABTI hide rules at runtime');
 
 contains(tracker, /abti_v3_/, 'Tracking storage keys must be versioned');
 assert.doesNotMatch(tracker, /STORAGE_PREFIX\s*=\s*'abti_'/, 'Legacy storage prefix must not be reused');
 
 contains(admin, /abti-help/, 'Admin help submenu must exist');
+contains(admin, /strpos\( \(string\) \$hook, 'abti-help' \)/, 'Help page must load admin assets');
 assert.ok(fs.existsSync(path.join(root, 'admin/views/help.php')), 'Help view must exist');
 
 console.log('v1.3 static contract: PASS');

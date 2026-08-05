@@ -1,6 +1,6 @@
 <?php
 /**
- * Veritabanı yardımcıları.
+ * Veritabani yardimcilari.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -19,15 +19,21 @@ class ABTI_Database {
         return $wpdb->prefix . 'abti_events';
     }
 
+    public static function assignments_table() {
+        global $wpdb;
+        return $wpdb->prefix . 'abti_assignments';
+    }
+
     /**
-     * Eklenti aktive edildiğinde tabloları oluştur.
+     * Eklenti aktive edildiginde veya surum yukseltildiginde tablolari olusturur.
      */
     public static function activate() {
         global $wpdb;
         $charset_collate = $wpdb->get_charset_collate();
 
-        $tests  = self::tests_table();
-        $events = self::events_table();
+        $tests       = self::tests_table();
+        $events      = self::events_table();
+        $assignments = self::assignments_table();
 
         $sql_tests = "CREATE TABLE {$tests} (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -58,21 +64,46 @@ class ABTI_Database {
             KEY visitor_id (visitor_id)
         ) {$charset_collate};";
 
+        $sql_assignments = "CREATE TABLE {$assignments} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            test_id BIGINT UNSIGNED NOT NULL,
+            variation_key VARCHAR(20) NOT NULL,
+            visitor_id VARCHAR(64) NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            UNIQUE KEY test_visitor (test_id, visitor_id),
+            KEY test_var (test_id, variation_key),
+            KEY created_at (created_at)
+        ) {$charset_collate};";
+
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta( $sql_tests );
         dbDelta( $sql_events );
+        dbDelta( $sql_assignments );
 
         update_option( 'abti_db_version', ABTI_VERSION );
     }
 
+    /**
+     * Upload ile degistirmede activation hook calismadigi icin surum kontrollu migration.
+     */
+    public static function maybe_upgrade() {
+        $installed = (string) get_option( 'abti_db_version', '0' );
+        if ( version_compare( $installed, ABTI_VERSION, '<' ) ) {
+            self::activate();
+        }
+    }
+
     public static function deactivate() {
-        // Tabloları silmiyoruz, kullanıcı eklentiyi tamamen kaldırırsa silelim.
+        // Tablolari silmiyoruz.
     }
 
     public static function uninstall() {
         global $wpdb;
-        $tests  = self::tests_table();
-        $events = self::events_table();
+        $tests       = self::tests_table();
+        $events      = self::events_table();
+        $assignments = self::assignments_table();
+        $wpdb->query( "DROP TABLE IF EXISTS {$assignments}" );
         $wpdb->query( "DROP TABLE IF EXISTS {$events}" );
         $wpdb->query( "DROP TABLE IF EXISTS {$tests}" );
         delete_option( 'abti_db_version' );
@@ -94,9 +125,6 @@ class ABTI_Database {
         return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id = %d", (int) $id ) );
     }
 
-    /**
-     * page_id verilen sayfa için aktif testleri getirir.
-     */
     public static function get_active_tests_for_page( $page_id ) {
         global $wpdb;
         $table = self::tests_table();
@@ -149,21 +177,118 @@ class ABTI_Database {
 
     public static function delete_test( $id ) {
         global $wpdb;
-        $tests  = self::tests_table();
-        $events = self::events_table();
+        $tests       = self::tests_table();
+        $events      = self::events_table();
+        $assignments = self::assignments_table();
+        $wpdb->delete( $assignments, array( 'test_id' => (int) $id ), array( '%d' ) );
         $wpdb->delete( $events, array( 'test_id' => (int) $id ), array( '%d' ) );
         return $wpdb->delete( $tests, array( 'id' => (int) $id ), array( '%d' ) );
     }
 
     /**
-     * Bir teste ait tüm event kayıtlarını siler. Test konfigürasyonu korunur.
-     *
-     * @return int|false Silinen satır sayısı veya false.
+     * Sadece event kayitlarini siler. Test ve kota atamalari korunur.
      */
     public static function reset_test_events( $id ) {
         global $wpdb;
         $events = self::events_table();
         return $wpdb->delete( $events, array( 'test_id' => (int) $id ), array( '%d' ) );
+    }
+
+    /* -----------------------------------------------------------------
+     * Kalici varyasyon atamalari
+     * ----------------------------------------------------------------- */
+
+    public static function get_visitor_assignment( $test_id, $visitor_id ) {
+        global $wpdb;
+        $table = self::assignments_table();
+        return $wpdb->get_var( $wpdb->prepare(
+            "SELECT variation_key FROM {$table} WHERE test_id = %d AND visitor_id = %s LIMIT 1",
+            (int) $test_id,
+            (string) $visitor_id
+        ) );
+    }
+
+    public static function get_assignment_counts( $test_id ) {
+        global $wpdb;
+        $table = self::assignments_table();
+        $rows  = $wpdb->get_results( $wpdb->prepare(
+            "SELECT variation_key, COUNT(*) AS total
+             FROM {$table}
+             WHERE test_id = %d
+             GROUP BY variation_key",
+            (int) $test_id
+        ) );
+
+        $counts = array();
+        foreach ( $rows as $row ) {
+            $counts[ $row->variation_key ] = (int) $row->total;
+        }
+        return $counts;
+    }
+
+    /**
+     * Mevcut atamayi dondurur veya hedef acigina gore yeni bir atama olusturur.
+     */
+    public static function assign_visitor( $test, $visitor_id ) {
+        global $wpdb;
+
+        $test_id    = isset( $test->id ) ? (int) $test->id : 0;
+        $visitor_id = substr( sanitize_text_field( $visitor_id ), 0, 64 );
+        $variations = isset( $test->variations ) ? json_decode( $test->variations, true ) : array();
+
+        if ( $test_id <= 0 || $visitor_id === '' || ! is_array( $variations ) || empty( $variations ) ) {
+            return false;
+        }
+
+        $valid_keys = wp_list_pluck( $variations, 'key' );
+        $lock_name  = 'abti_assign_' . $test_id;
+        $has_lock   = (int) $wpdb->get_var( $wpdb->prepare(
+            'SELECT GET_LOCK(%s, 2)',
+            $lock_name
+        ) ) === 1;
+
+        try {
+            $existing = self::get_visitor_assignment( $test_id, $visitor_id );
+            if ( $existing && in_array( $existing, $valid_keys, true ) ) {
+                return $existing;
+            }
+
+            $table = self::assignments_table();
+            if ( $existing ) {
+                $wpdb->delete(
+                    $table,
+                    array( 'test_id' => $test_id, 'visitor_id' => $visitor_id ),
+                    array( '%d', '%s' )
+                );
+            }
+
+            $counts = self::get_assignment_counts( $test_id );
+            $chosen = ABTI_Quota::choose_variation( $variations, $counts );
+            if ( $chosen === '' ) {
+                return false;
+            }
+
+            $inserted = $wpdb->query( $wpdb->prepare(
+                "INSERT IGNORE INTO {$table}
+                    (test_id, variation_key, visitor_id, created_at)
+                 VALUES (%d, %s, %s, %s)",
+                $test_id,
+                $chosen,
+                $visitor_id,
+                current_time( 'mysql' )
+            ) );
+
+            if ( $inserted ) {
+                return $chosen;
+            }
+
+            $existing = self::get_visitor_assignment( $test_id, $visitor_id );
+            return $existing && in_array( $existing, $valid_keys, true ) ? $existing : false;
+        } finally {
+            if ( $has_lock ) {
+                $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
+            }
+        }
     }
 
     /* -----------------------------------------------------------------
@@ -186,9 +311,6 @@ class ABTI_Database {
         );
     }
 
-    /**
-     * Bir test için varyasyon bazında özet istatistik döndürür.
-     */
     public static function get_test_stats( $test_id ) {
         global $wpdb;
         $events = self::events_table();
@@ -201,9 +323,6 @@ class ABTI_Database {
         ) );
     }
 
-    /**
-     * Tarih bazlı zaman serisi (gün gün).
-     */
     public static function get_test_timeseries( $test_id, $start = null, $end = null ) {
         global $wpdb;
         $events = self::events_table();
