@@ -4,46 +4,72 @@ Tags: ab-testing, split-testing, elementor, conversion-optimization
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.2.0
+Stable tag: 1.3.1
 
-Elementor ile tasarlanmış sayfalar için basit A/B testi.
+Elementor ile tasarlanmış sayfalar için tarayıcı bazlı, kota dengeli A/B testi.
 
 == Açıklama ==
 
-Bu eklenti, sayfanızda bir element/section/container'ın iki (veya daha fazla, en fazla 5) varyasyonunu eş zamanlı yayınlamanıza ve dönüşüm oranlarını ölçmenize yarar.
+Bu eklenti, sayfanızda bir element/section/container'ın iki veya daha fazla (en fazla 5) varyasyonunu yayınlamanıza ve dönüşüm oranlarını ölçmenize yarar.
 
 = Nasıl çalışır =
 
 1. Elementor'da test etmek istediğiniz section/container/element'i kopyalayın.
-2. WP Admin > A/B Test int > "+ Test Ekle" deyin.
-3. Eklentinin üreteceği CSS ID/Class adını (örn. `a-fe46yhs2`) Elementor "Advanced > CSS ID" veya "Advanced > CSS Classes" alanına `#` veya `.` işareti olmadan yapıştırın.
-4. Hedef davranışı (tıklama veya form submit) ve ölçümlenecek selector'ı girin.
-5. Kaydedin. Sayfa frontend'inde her ziyaretçiye yüzdelere göre random bir varyasyon gösterilir.
+2. WP Admin > A/B Test int > Yeni Test yoluyla testi oluşturun.
+3. Üretilen CSS ID/Class adını Elementor Advanced > CSS ID veya CSS Classes alanına # veya . işareti olmadan yapıştırın.
+4. Varyasyon yüzdelerini toplam 100 olacak şekilde ayarlayın.
+5. Hedef davranışı (tıklama veya form submit) ve gerekiyorsa CSS selector'ı girin.
+6. İlk ziyarette head içindeki picker sunucudan kota dengeli atamayı alır; sonraki ziyaretlerde aynı tarayıcı kayıtlı varyasyonu anında kullanır.
+
+= Atama ve dengeleme =
+
+* Atamalar tarayıcı profiline özeldir. Aynı cihazdaki Chrome ve Firefox ayrı ziyaretçi sayılır.
+* Gizli pencere kapatılıp yeni bir gizli oturum açıldığında yeni ziyaretçi ve atama oluşur.
+* v1.3 anahtarları abti_v3_ öneki kullanır; v1.2 localStorage kayıtları dikkate alınmaz.
+* Sunucu, her varyasyonun hedef oranı ile mevcut kalıcı atama sayısını karşılaştırır ve hedefin en gerisindeki varyasyonu seçer.
+* Kota açıkları eşitse adaylar toplam atama sayısına göre deterministik olarak döndürülür; her zaman A seçilmez.
+* Aynı testte eş zamanlı ilk ziyaretlerin dağılımı bozmasını azaltmak için kısa süreli MySQL named lock kullanılır.
 
 = Önemli notlar =
 
-* Cache eklentileri (WP Rocket, Autoptimize, LiteSpeed Cache, WP Fastest Cache, SG Optimizer) için otomatik exclude filtreleri eklenmiştir.
-* Test oluşturduktan/güncelledikten sonra ilgili sayfanın page cache'ini temizleyin.
-* WP Rocket "Delay JavaScript", "Load JavaScript deferred" ve "Remove Unused CSS" gibi optimizasyonlar kullanılıyorsa eklenti picker script'ini ve inline gizleme CSS'ini otomatik dışarıda bırakmaya çalışır. Buna rağmen sorun görürseniz ilgili sayfa cache/CDN cache'ini temizleyin.
-* Tracking REST API üzerinden çalışır (`/wp-json/abti/v1/track`) — bu endpoint zaten cache dışıdır.
+* Test elementlerinde Elementor Responsive > Hide ayarını kullanmayın. Görünürlüğü eklenti yönetir.
+* WP Rocket, Autoptimize, LiteSpeed Cache, WP Fastest Cache ve SG Optimizer için otomatik exclude filtreleri vardır.
+* Picker ve inline gizleme CSS'i WP Rocket minify, defer, delay ve Remove Unused CSS işlemlerinden dışlanır.
+* Atama endpoint'i (/wp-json/abti/v1/assign) no-store başlıkları döndürür. Ana sayfa cache'lenebilir, atama cevabı cache'lenmez.
+* Test oluşturduktan veya güncelledikten sonra WP Rocket sayfa cache'ini ve Used CSS verisini temizleyin. CDN/Cloudflare cache'i varsa ilgili sayfayı orada da temizleyin.
+* İstatistik sıfırlama yalnızca view/conversion event'lerini siler; test ayarları, CSS ID'leri ve kalıcı atamalar korunur.
+
+= Silmeden güncelleme =
+
+WordPress Admin > Eklentiler > Eklenti Ekle > Eklenti Yükle yoluyla yeni ZIP'i yükleyin ve mevcut eklentiyi yenisiyle değiştirmeyi onaylayın. v1.3 migration rutini mevcut abti_tests ve abti_events tablolarına dokunmadan abti_assignments tablosunu ekler.
 
 == Changelog ==
 
+= 1.3.1 =
+* WP Rocket Remove Unused CSS ile uyumluluk guclendirildi; ABTI gizleme CSS'i Used CSS bloguna kopyalanmaz.
+* Eski cache'ten kalmis WP Rocket Used CSS icindeki ABTI display:none kurallari picker tarafindan temizlenir.
+* Inline hide style icin v1.3.1'e ozel DOM marker'i eklendi. DB, test kayitlari ve varyasyon CSS ID/Class degerleri korunur.
+
+
+= 1.3.0 =
+* Tarayıcı bazlı storage anahtarları abti_v3_ önekine taşındı; eski picker kayıtları yok sayılıyor.
+* Kalıcı abti_assignments tablosu ve upload ile güncellemede çalışan additive dbDelta migration eklendi.
+* İlk ziyaret ataması sunucu taraflı hedef-açığı kotasıyla ve body render edilmeden önce yapılıyor.
+* Eşit kota açıklarında deterministik rotasyon, eş zamanlı atamalarda test-bazlı MySQL lock eklendi.
+* Atama REST cevabı cache dışı bırakıldı; WP Rocket minify/defer/delay/Used CSS exclude imzaları genişletildi.
+* Admin'e Nasıl Çalışır sayfası ve test listesine rehber bağlantısı eklendi.
+* Plugin header ve asset sürümü 1.3.0 olarak eşitlendi.
+
 = 1.2.0 =
-* Hata düzeltme: Cache/minify eklentileri `id="abti-hide-all"` attribute'unu kaldırdığında picker yeni bir `<style>` oluşturuyordu; orijinal style DOM'da kalıp her iki varyasyonu da gizliyordu. Artık `data-abti` attribute'u ve `previousElementSibling` ile orijinal style güvenilir şekilde bulunup güncelleniyor.
-* Hata düzeltme: Picker JS'de try-catch yoktu; beklenmedik bir hata oluştuğunda CSS tüm elementleri gizli bırakıyordu. Artık herhangi bir istisna yakalanıyor.
-* Davranış: Picker başarısız olsa bile kullanıcıya iki element aynı anda gösterilmiyor; PHP fallback'i (index-0 varyasyonu görünür) devreye giriyor.
-* Güvenilirlik: Varyasyon `key` alanı eksikse o test güvenli şekilde atlanıyor, diğer testler etkilenmiyor.
+* Cache/minify eklentileri style ID'sini değiştirse bile data-abti ile gizleme style'ı güvenilir biçimde bulunuyor.
+* Picker hatasında PHP index-0 fallback'i sayfanın boş kalmasını önlüyor.
 
 = 1.1.1 =
-* Sağlamlık: Picker script'i optimizasyon eklentileri tarafından geciktirilirse sayfa boş kalmasın diye ilk varyasyon CSS fallback olarak görünür bırakıldı.
-* Uyumluluk: WP Rocket, LiteSpeed Cache, Autoptimize ve SG Optimizer için inline JS/CSS exclude imzaları genişletildi.
-* Admin: Elementor CSS ID/Class alanlarına yapıştırmak için kopyalama artık `#` / `.` prefix'i olmadan yapılır.
+* Picker ve inline CSS için cache/optimizasyon exclude kapsamı genişletildi.
 
 = 1.1.0 =
-* Performans: Varyasyon seçimi artık head içinde, body parse edilmeden önce inline çalışıyor. Eski versiyonda DOMContentLoaded sonrası olan "geç beliren element" sorunu giderildi.
-* Stats sayfasına küçük ve onaylı "İstatistik verilerini sıfırla" butonu eklendi (test ayarlarına dokunmaz).
-* Tracking script'i artık footer'da defer ile yükleniyor.
+* Varyasyon seçimi head içinde body parse edilmeden çalışacak şekilde taşındı.
+* İstatistik verilerini sıfırlama eklendi.
 
 = 1.0.0 =
 * İlk sürüm.

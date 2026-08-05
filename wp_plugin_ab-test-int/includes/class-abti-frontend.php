@@ -23,6 +23,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class ABTI_Frontend {
 
+    const HIDE_STYLE_ID = 'abti-v131-hide-all';
+    const HIDE_STYLE_ATTR = 'data-abti-rucss';
+    const HIDE_STYLE_ATTR_VALUE = 'skip';
+
     /** @var array */
     private $tests_for_page = array();
 
@@ -43,6 +47,10 @@ class ABTI_Frontend {
         add_filter( 'rocket_exclude_defer_js', array( $this, 'rocket_exclude_js' ) );
         add_filter( 'rocket_exclude_css', array( $this, 'rocket_exclude_css' ) );
         add_filter( 'rocket_rucss_inline_content_exclusions', array( $this, 'rocket_rucss_inline_content_exclusions' ) );
+        add_filter( 'rocket_rucss_inline_atts_exclusions', array( $this, 'rocket_rucss_inline_atts_exclusions' ) );
+        add_filter( 'rocket_rucss_skip_styles_with_attr', array( $this, 'rocket_rucss_skip_styles_with_attr' ) );
+        add_filter( 'rocket_usedcss_content', array( $this, 'rocket_usedcss_content' ) );
+        add_action( 'admin_init', array( $this, 'maybe_clear_rocket_used_css_after_update' ) );
 
         add_filter( 'autoptimize_filter_js_exclude', array( $this, 'autoptimize_js_exclude' ) );
         add_filter( 'autoptimize_filter_css_exclude', array( $this, 'autoptimize_css_exclude' ) );
@@ -121,8 +129,8 @@ class ABTI_Frontend {
         }
 
         echo "<!--noptimize-->\n";
-        echo '<style id="abti-hide-all" data-abti="1" data-no-optimize="1" data-no-minify="1">';
-        echo '/* abti-hide-all */';
+        echo '<style id="' . esc_attr( self::HIDE_STYLE_ID ) . '" data-abti="1" ' . esc_attr( self::HIDE_STYLE_ATTR ) . '="' . esc_attr( self::HIDE_STYLE_ATTR_VALUE ) . '" data-no-optimize="1" data-no-minify="1">';
+        echo '/* ' . esc_html( self::HIDE_STYLE_ID ) . ' */';
         echo implode( ',', array_map( 'esc_html', $selectors ) );
         echo '{display:none !important;}';
         echo "</style>\n";
@@ -140,8 +148,9 @@ class ABTI_Frontend {
         }
 
         $config = array(
-            'rest'  => esc_url_raw( rest_url( 'abti/v1/track' ) ),
-            'tests' => $this->tests_for_page,
+            'rest'   => esc_url_raw( rest_url( 'abti/v1/track' ) ),
+            'assign' => esc_url_raw( rest_url( 'abti/v1/assign' ) ),
+            'tests'  => $this->tests_for_page,
         );
 
         $config_json = wp_json_encode( $config );
@@ -165,11 +174,9 @@ class ABTI_Frontend {
     private function get_picker_js() {
         return <<<'JS'
 (function(){
-/* --- hide-all style elementini güvenilir şekilde bul --- */
 function findHideStyle(){
-  var s=document.getElementById('abti-hide-all');
+  var s=document.getElementById('abti-v131-hide-all')||document.getElementById('abti-hide-all');
   if(s)return s;
-  // ID minify edilmişse: picker script'inden önceki style'ı bul
   var cs=document.currentScript||(function(){var ss=document.getElementsByTagName('script');return ss[ss.length-1];}());
   if(cs){
     var ps=cs.previousElementSibling;
@@ -185,6 +192,16 @@ var c=window.ABTI_CONFIG;
 if(!c||!c.tests||!c.tests.length)return;
 function lg(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function ls(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+var visitorWasStored=false;
+function visitorId(){
+  var k='abti_v3_visitor',id=lg(k);
+  visitorWasStored=!!id;
+  if(!id){
+    id='v_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+    ls(k,id);
+  }
+  return id;
+}
 function esc(s){
   if(window.CSS&&CSS.escape)return CSS.escape(s);
   s=String(s);
@@ -200,48 +217,70 @@ function esc(s){
   return o;
 }
 function sel(v){return (v.selector_type==='class'?'.':'#')+esc(v.selector)}
-var hide=[],assign={};
-for(var i=0;i<c.tests.length;i++){
-  var t=c.tests[i],ck='abti_test_'+t.id,k=lg(ck),chosen=null;
-  if(k){
-    for(var j=0;j<t.variations.length;j++){
-      if(t.variations[j].key===k){chosen=t.variations[j];break;}
-    }
+function findVariation(t,key){
+  for(var i=0;i<t.variations.length;i++){
+    if(t.variations[i].key===key)return t.variations[i];
   }
-  if(!chosen){
-    var tot=0;
-    for(var n=0;n<t.variations.length;n++)tot+=Number(t.variations[n].percentage)||0;
-    if(tot<=0){
-      chosen=t.variations[Math.floor(Math.random()*t.variations.length)];
-    }else{
-      var r=Math.random()*tot,ac=0;
-      for(var m=0;m<t.variations.length;m++){
-        ac+=Number(t.variations[m].percentage)||0;
-        if(r<ac){chosen=t.variations[m];break;}
-      }
-      if(!chosen)chosen=t.variations[t.variations.length-1];
+  return null;
+}
+function reEsc(s){return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}
+function stripCssRule(css,selector){
+  var re=new RegExp('(^|\\})\\s*([^{}]*'+reEsc(selector)+'[^{}]*)\\{\\s*display\\s*:\\s*none\\s*!important\\s*;?\\s*\\}','g');
+  return String(css||'').replace(re,function(m,p){return p==='}'?'}':''});
+}
+function stripStaleOptimizerCss(selectors){
+  if(!selectors||!selectors.length||!document.getElementsByTagName)return;
+  var styles=document.getElementsByTagName('style');
+  for(var si=0;si<styles.length;si++){
+    var el=styles[si],id=el&&el.id?String(el.id):'';
+    if(id!=='wpr-usedcss')continue;
+    var css=el.textContent||'';
+    for(var sj=0;sj<selectors.length;sj++){css=stripCssRule(css,selectors[sj])}
+    el.textContent=css;
+  }
+}
+function requestAssignment(t,id){
+  try{
+    var xhr=new XMLHttpRequest();
+    xhr.open('POST',c.assign,false);
+    xhr.setRequestHeader('Content-Type','application/json');
+    xhr.setRequestHeader('Cache-Control','no-cache');
+    xhr.send(JSON.stringify({test_id:t.id,visitor_id:id}));
+    if(xhr.status>=200&&xhr.status<300){
+      var data=JSON.parse(xhr.responseText||'{}');
+      return data&&data.ok?data.variation_key:null;
     }
+  }catch(e){}
+  return null;
+}
+var hide=[],allSelectors=[],assign={},vid=visitorId();
+window.ABTI_VISITOR_ID=vid;
+for(var i=0;i<c.tests.length;i++){
+  var t=c.tests[i],ck='abti_v3_test_'+t.id,k=lg(ck),chosen=visitorWasStored?findVariation(t,k):null;
+  if(!chosen){
+    var serverKey=requestAssignment(t,vid);
+    chosen=findVariation(t,serverKey);
     if(chosen&&chosen.key)ls(ck,chosen.key);
   }
-  // chosen veya chosen.key yoksa bu test atlanır; PHP index-0'ı zaten görünür bıraktı
-  if(!chosen||!chosen.key){continue;}
+  if(!chosen&&t.variations.length){
+    chosen=t.variations[0];
+  }
+  if(!chosen||!chosen.key)continue;
   assign[t.id]=chosen.key;
   for(var p=0;p<t.variations.length;p++){
-    var v=t.variations[p];
-    if(v.key!==chosen.key)hide.push(sel(v));
+    var v=t.variations[p],vs=sel(v);
+    allSelectors.push(vs);
+    if(v.key!==chosen.key)hide.push(vs);
   }
 }
 window.ABTI_ASSIGN=assign;
 var st=findHideStyle();
 if(st){
   st.textContent=hide.length?(hide.join(',')+'{display:none !important;}'):'';
-}else{
-  // Style bulunamadı — elementler zaten görünürdür, sadece assign'ı set et
 }
+stripStaleOptimizerCss(allSelectors);
 window.ABTI_PICKER_DONE=true;
 }catch(e){
-  // Picker beklenmedik hata aldı — iki element aynı anda görünmesin.
-  // PHP zaten index-0 varyasyonunu görünür bıraktı, style değiştirilmez.
   window.ABTI_PICKER_DONE=false;
 }
 })();
@@ -344,18 +383,104 @@ JS;
             'ABTI_CONFIG',
             'ABTI_ASSIGN',
             'abti-picker',
+            'abti-v131-hide-all',
+            'stripStaleOptimizerCss',
             'ABTI v',
             'window.ABTI_CONFIG',
             'window.ABTI_ASSIGN',
+            'abti/v1/assign',
+            'abti_v3_',
+            "xhr.open('POST',c.assign,false)",
         );
     }
 
     private function css_exclusion_patterns() {
         return array(
+            'abti-v131-hide-all',
             'abti-hide-all',
+            'data-abti-rucss',
             'ABTI',
             'data-no-optimize',
         );
+    }
+
+    private function rucss_attribute_exclusion_patterns() {
+        return array(
+            self::HIDE_STYLE_ATTR,
+            self::HIDE_STYLE_ATTR . '="' . self::HIDE_STYLE_ATTR_VALUE . '"',
+            self::HIDE_STYLE_ATTR . "='" . self::HIDE_STYLE_ATTR_VALUE . "'",
+            'id="' . self::HIDE_STYLE_ID . '"',
+            "id='" . self::HIDE_STYLE_ID . "'",
+        );
+    }
+
+    private function abti_variation_selectors_for_page() {
+        $selectors = array();
+        foreach ( $this->tests_for_page as $test ) {
+            if ( empty( $test['variations'] ) || ! is_array( $test['variations'] ) ) {
+                continue;
+            }
+            foreach ( $test['variations'] as $variation ) {
+                $selector = $this->build_selector( $variation );
+                if ( $selector ) {
+                    $selectors[] = $selector;
+                }
+            }
+        }
+        return array_values( array_unique( $selectors ) );
+    }
+
+    private function strip_abti_usedcss_rules( $css ) {
+        if ( ! is_string( $css ) || $css === '' ) {
+            return $css;
+        }
+
+        $selectors = $this->abti_variation_selectors_for_page();
+        if ( empty( $selectors ) ) {
+            return $css;
+        }
+
+        return preg_replace_callback( '/([^{}]+)\{([^{}]+)\}/', function ( $matches ) use ( $selectors ) {
+            $selector_text = $matches[1];
+            $declaration   = $matches[2];
+            if ( ! preg_match( '/display\s*:\s*none\s*!important/i', $declaration ) ) {
+                return $matches[0];
+            }
+            foreach ( $selectors as $selector ) {
+                if ( strpos( $selector_text, $selector ) !== false ) {
+                    return '';
+                }
+            }
+            return $matches[0];
+        }, $css );
+    }
+
+    private function clear_rocket_used_css() {
+        if ( ! function_exists( 'rocket_clean_domain' ) ) {
+            return;
+        }
+
+        try {
+            $container = apply_filters( 'rocket_container', null );
+            if ( is_object( $container ) && method_exists( $container, 'get' ) ) {
+                $subscriber = $container->get( 'rucss_admin_subscriber' );
+                if ( is_object( $subscriber ) && method_exists( $subscriber, 'truncate_used_css' ) ) {
+                    $subscriber->truncate_used_css();
+                }
+            }
+            rocket_clean_domain();
+        } catch ( Throwable $e ) {
+            return;
+        }
+    }
+
+    public function maybe_clear_rocket_used_css_after_update() {
+        if ( get_option( 'abti_rocket_compat_version' ) === ABTI_VERSION ) {
+            return;
+        }
+
+        $this->clear_rocket_used_css();
+        update_option( 'abti_rocket_compat_version', ABTI_VERSION, false );
     }
 
     public function rocket_exclude_js( $excluded ) {
@@ -404,6 +529,30 @@ JS;
             $excluded[] = $pattern;
         }
         return $excluded;
+    }
+
+    public function rocket_rucss_inline_atts_exclusions( $excluded ) {
+        if ( ! is_array( $excluded ) ) {
+            $excluded = array();
+        }
+        foreach ( $this->rucss_attribute_exclusion_patterns() as $pattern ) {
+            $excluded[] = $pattern;
+        }
+        return $excluded;
+    }
+
+    public function rocket_rucss_skip_styles_with_attr( $excluded ) {
+        if ( ! is_array( $excluded ) ) {
+            $excluded = array();
+        }
+        foreach ( $this->rucss_attribute_exclusion_patterns() as $pattern ) {
+            $excluded[] = $pattern;
+        }
+        return $excluded;
+    }
+
+    public function rocket_usedcss_content( $css ) {
+        return $this->strip_abti_usedcss_rules( $css );
     }
 
     public function autoptimize_js_exclude( $excluded ) {

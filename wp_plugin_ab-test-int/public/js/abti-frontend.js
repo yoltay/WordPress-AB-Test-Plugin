@@ -21,7 +21,7 @@
 
     var cfg = window.ABTI_CONFIG;
     var ASSIGN = window.ABTI_ASSIGN;
-    var STORAGE_PREFIX = 'abti_';
+    var STORAGE_PREFIX = 'abti_v3_';
     var VISITOR_KEY = STORAGE_PREFIX + 'visitor';
     var SESSION_VIEW_PREFIX = STORAGE_PREFIX + 'view_';
     var CONV_PREFIX = STORAGE_PREFIX + 'conv_';
@@ -45,11 +45,12 @@
     function ssSet(k, v) { if (ss) { try { ss.setItem(k, v); } catch (e) {} } }
 
     function getVisitorId() {
-        var id = lsGet(VISITOR_KEY);
+        var id = window.ABTI_VISITOR_ID || lsGet(VISITOR_KEY);
         if (!id) {
             id = 'v_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-            lsSet(VISITOR_KEY, id);
         }
+        lsSet(VISITOR_KEY, id);
+        window.ABTI_VISITOR_ID = id;
         return id;
     }
 

@@ -4,12 +4,21 @@
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-$new_url = add_query_arg( array( 'page' => 'abti-tests-new' ), admin_url( 'admin.php' ) );
+$new_url  = add_query_arg( array( 'page' => 'abti-tests-new' ), admin_url( 'admin.php' ) );
+$help_url = add_query_arg( array( 'page' => 'abti-help' ), admin_url( 'admin.php' ) );
 ?>
 <div class="wrap abti-wrap">
     <h1 class="wp-heading-inline"><?php esc_html_e( 'A/B Test int', 'ab-test-int' ); ?></h1>
     <a href="<?php echo esc_url( $new_url ); ?>" class="page-title-action">+ <?php esc_html_e( 'Test Ekle', 'ab-test-int' ); ?></a>
     <hr class="wp-header-end" />
+
+    <div class="abti-help-banner">
+        <div>
+            <strong><?php esc_html_e( 'Kurulum ve çalışma rehberi', 'ab-test-int' ); ?></strong>
+            <p><?php esc_html_e( 'CSS ID yerleşimi, hedef seçimi, kota dengeleme ve WP Rocket önbellek adımlarını kontrol edin.', 'ab-test-int' ); ?></p>
+        </div>
+        <a href="<?php echo esc_url( $help_url ); ?>" class="button"><?php esc_html_e( 'Nasıl Çalışır?', 'ab-test-int' ); ?></a>
+    </div>
 
     <?php if ( ! empty( $_GET['deleted'] ) ) : ?>
         <div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Test silindi.', 'ab-test-int' ); ?></p></div>

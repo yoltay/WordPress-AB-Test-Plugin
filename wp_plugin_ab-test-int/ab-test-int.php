@@ -2,7 +2,7 @@
 /**
  * Plugin Name: A/B Test int
  * Description: Elementor ile tasarlanmış sayfalar için basit A/B test eklentisi. Sayfada varyasyonları CSS ID/Class ile işaretleyip ölçümlersiniz.
- * Version: 1.2.0
+ * Version: 1.3.1
  * Author: Sedat Y
  * Text Domain: ab-test-int
  * Requires at least: 5.6
@@ -13,12 +13,13 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'ABTI_VERSION', '1.1.1' );
+define( 'ABTI_VERSION', '1.3.1' );
 define( 'ABTI_FILE', __FILE__ );
 define( 'ABTI_DIR', plugin_dir_path( __FILE__ ) );
 define( 'ABTI_URL', plugin_dir_url( __FILE__ ) );
 define( 'ABTI_BASENAME', plugin_basename( __FILE__ ) );
 
+require_once ABTI_DIR . 'includes/class-abti-quota.php';
 require_once ABTI_DIR . 'includes/class-abti-database.php';
 require_once ABTI_DIR . 'includes/class-abti-rest.php';
 require_once ABTI_DIR . 'includes/class-abti-frontend.php';
@@ -42,6 +43,7 @@ register_uninstall_hook( __FILE__, 'abti_uninstall_cleanup' );
  * Bootstrap.
  */
 add_action( 'plugins_loaded', function () {
+    ABTI_Database::maybe_upgrade();
     load_plugin_textdomain( 'ab-test-int', false, dirname( ABTI_BASENAME ) . '/languages' );
 
     new ABTI_REST();
